@@ -1,4 +1,4 @@
-# 编译并安装 Flow Launcher 插件脚本
+﻿# 编译并安装 Flow Launcher 插件脚本
 
 param(
     [ValidateSet("Debug", "Release")]
@@ -121,62 +121,29 @@ Write-Host ""
 # 5. 清理日志文件
 Write-Host "[5/8] 清理 Flow Launcher 日志..." -ForegroundColor Yellow
 $FlowLauncherLogsPath = Join-Path $env:APPDATA "FlowLauncher\Logs"
+$LogFiles = @()
 if (Test-Path $FlowLauncherLogsPath) {
-    # 递归查找所有子目录中的日志文件（.txt 和 .log）
-    $LogFiles = Get-ChildItem -Path $FlowLauncherLogsPath -File -Recurse | Where-Object { $_.Extension -match '\.(txt|log)$' }
-    if ($LogFiles) {
-        Write-Host "找到 $($LogFiles.Count) 个日志文件" -ForegroundColor Gray
-        $DeletedCount = 0
-        $FailedCount = 0
-
-        foreach ($LogFile in $LogFiles) {
-            $RelativePath = $LogFile.FullName.Replace($env:APPDATA, '%APPDATA%')
-            try {
-                # 尝试删除文件
-                Remove-Item -Path $LogFile.FullName -Force -ErrorAction Stop
-                Write-Host "  ✓ 删除: $RelativePath" -ForegroundColor Gray
-                $DeletedCount++
-            } catch {
-                # 如果删除失败，显示详细错误信息
-                $FailedCount++
-                Write-Host "  ✗ 删除失败: $RelativePath" -ForegroundColor Red
-                Write-Host "    错误: $($_.Exception.Message)" -ForegroundColor Red
-
-                # 尝试找出哪个进程占用了该文件
-                try {
-                    $FilePath = $LogFile.FullName
-                    $ProcessesUsingFile = Get-Process | Where-Object {
-                        try {
-                            $_.Handles -and $_.Modules.Path -contains $FilePath
-                        } catch {
-                            $false
-                        }
-                    }
-
-                    if ($ProcessesUsingFile) {
-                        Write-Host "    可能被以下进程占用:" -ForegroundColor Yellow
-                        foreach ($proc in $ProcessesUsingFile) {
-                            Write-Host "      - $($proc.ProcessName) (PID: $($proc.Id))" -ForegroundColor Yellow
-                        }
-                    }
-                } catch {
-                    # 忽略检测进程占用的错误
-                }
-            }
-        }
-
-        Write-Host ""
-        if ($DeletedCount -gt 0) {
-            Write-Host "成功删除 $DeletedCount 个日志文件" -ForegroundColor Green
-        }
-        if ($FailedCount -gt 0) {
-            Write-Host "删除失败 $FailedCount 个日志文件" -ForegroundColor Red
-        }
-    } else {
-        Write-Host "没有找到日志文件" -ForegroundColor Gray
-    }
+    $LogFiles = Get-ChildItem -Path $FlowLauncherLogsPath -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '\.(txt|log)$' }
+}
+if ($LogFiles.Count -eq 0) {
+    Write-Host "没有找到日志文件或目录不存在" -ForegroundColor Gray
 } else {
-    Write-Host "日志目录不存在: $FlowLauncherLogsPath" -ForegroundColor Gray
+    Write-Host "找到 $($LogFiles.Count) 个日志文件" -ForegroundColor Gray
+    $DeletedCount = 0
+    $FailedCount = 0
+    foreach ($LogFile in $LogFiles) {
+        $RelativePath = $LogFile.FullName.Replace($env:APPDATA, '%APPDATA%')
+        try {
+            Remove-Item -Path $LogFile.FullName -Force -ErrorAction Stop
+            Write-Host "  OK 删除: $RelativePath" -ForegroundColor Gray
+            $DeletedCount++
+        } catch {
+            $FailedCount++
+            Write-Host "  删除失败: $RelativePath" -ForegroundColor Red
+        }
+    }
+    if ($DeletedCount -gt 0) { Write-Host "成功删除 $DeletedCount 个日志文件" -ForegroundColor Green }
+    if ($FailedCount -gt 0) { Write-Host "删除失败 $FailedCount 个日志文件" -ForegroundColor Red }
 }
 Write-Host ""
 
