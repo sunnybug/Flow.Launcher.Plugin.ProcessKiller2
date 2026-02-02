@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using Flow.Launcher.Plugin;
 
@@ -21,6 +22,10 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
         public List<Result> Query(Query query)
         {
             var search = (query?.Search ?? "").Trim();
+            // 空查询不显示列表，仅在有输入时再触发
+            if (string.IsNullOrEmpty(search))
+                return new List<Result>();
+
             var items = LoadProcessInfos();
             var results = new List<Result>();
 
@@ -34,7 +39,7 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                 {
                     Title = $"{name} (PID: {pid})",
                     SubTitle = subTitle,
-                    IcoPath = "icon.png",
+                    IcoPath = string.IsNullOrEmpty(subTitle) || subTitle == "结束进程" ? "icon.png" : subTitle,
                     Score = score,
                     Action = _ =>
                     {
@@ -56,6 +61,13 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             return results.OrderByDescending(r => r.Score).ToList();
         }
 
+        /// <summary>Windows 关键系统进程名（不含后缀），列表中不显示。</summary>
+        private static readonly HashSet<string> CriticalProcessNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "System", "Idle", "smss", "csrss", "wininit", "services", "lsass",
+            "winlogon", "fontdrvhost", "dwm", "Registry", "Memory Compression"
+        };
+
         /// <summary>加载当前所有可访问的进程信息，返回 (PID, 可执行文件名不含后缀, 副标题)。不持有 Process 句柄。</summary>
         private static List<(int Pid, string Name, string SubTitle)> LoadProcessInfos()
         {
@@ -74,8 +86,8 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             {
                 try
                 {
-                    var name = p.ProcessName ?? "";
-                    if (string.IsNullOrEmpty(name))
+                    var name = GetProcessDisplayName(p);
+                    if (string.IsNullOrEmpty(name) || CriticalProcessNames.Contains(name))
                         continue;
                     var pid = p.Id;
                     var subTitle = GetProcessSubTitle(p);
@@ -100,10 +112,6 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             if (string.IsNullOrEmpty(processName))
                 return -1;
 
-            // 空搜索：返回正分，避免 Flow Launcher 过滤掉 Score<=0 的结果导致不显示
-            if (string.IsNullOrEmpty(search))
-                return 100;
-
             var name = processName.AsSpan();
             var term = search.AsSpan();
             var nameLower = processName.ToLowerInvariant();
@@ -117,6 +125,25 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                 return 50 - idx;
 
             return -1;
+        }
+
+        /// <summary>获取进程显示名。Windows 上 ProcessName 可能为空，则从主模块路径解析。</summary>
+        private static string GetProcessDisplayName(Process process)
+        {
+            var name = process.ProcessName?.Trim();
+            if (!string.IsNullOrEmpty(name))
+                return name;
+            try
+            {
+                var path = process.MainModule?.FileName;
+                if (!string.IsNullOrEmpty(path))
+                    return Path.GetFileNameWithoutExtension(path);
+            }
+            catch
+            {
+                // 无权限或 32/64 位差异时 MainModule 会抛
+            }
+            return "";
         }
 
         private static string GetProcessSubTitle(Process process)

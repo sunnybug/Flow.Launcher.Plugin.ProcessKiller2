@@ -1,6 +1,7 @@
-﻿{
+{
     "ID": "88db58ee360d9d08a824a8e75ba2e63c",
     "ActionKeyword": "ki",
+    "TriggerOnEmptyQuery": false,
     "Name": "ProcessKiller2",
     "Description": "a Process Killer plugin for Flow-Launcher,support kill by port",
     "Author": "sunnybug",
