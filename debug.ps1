@@ -1,4 +1,3 @@
-# -*- coding: utf-8-with-bom -*-
 # 编译并安装 Flow Launcher 插件脚本
 
 param(

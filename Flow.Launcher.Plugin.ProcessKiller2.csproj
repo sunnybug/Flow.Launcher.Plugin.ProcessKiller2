@@ -1,12 +1,12 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
     <AssemblyName>Flow.Launcher.Plugin.ProcessKiller2</AssemblyName>
     <PackageId>Flow.Launcher.Plugin.ProcessKiller2</PackageId>
-    <Authors>SunnyBug</Authors>
-    <PackageProjectUrl>https://github.com/SunnyBug/Flow.Launcher.Plugin.ProcessKiller2</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/SunnyBug/Flow.Launcher.Plugin.ProcessKiller2</RepositoryUrl>
+    <Authors>sunnybug</Authors>
+    <PackageProjectUrl>https://github.com/sunnybug/Flow.Launcher.Plugin.ProcessKiller2</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/sunnybug/Flow.Launcher.Plugin.ProcessKiller2</RepositoryUrl>
     <PackageTags>flow-launcher flow-plugin</PackageTags>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>

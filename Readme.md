@@ -1,8 +1,8 @@
-Flow.Launcher.Plugin.ProcessKiller2
+﻿Flow.Launcher.Plugin.ProcessKiller2
 ==================
 
 A plugin for the [Flow launcher](https://github.com/Flow-Launcher/Flow.Launcher).
 
 ### Usage
 
-    kill <arguments>
+    ki <arguments>
