@@ -29,17 +29,22 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             var items = LoadProcessInfos();
             var results = new List<Result>();
 
-            foreach (var (pid, name, subTitle) in items)
+            foreach (var (pid, name, subTitleOrPath, windowTitle) in items)
             {
                 int score = ComputeScore(name, search);
                 if (score < 0)
                     continue;
 
+                var title = !string.IsNullOrEmpty(windowTitle)
+                    ? windowTitle
+                    : $"{name} (PID: {pid})";
+                var subTitle = $"{name} (PID: {pid}) · " + (subTitleOrPath ?? "结束进程");
+
                 var result = new Result
                 {
-                    Title = $"{name} (PID: {pid})",
+                    Title = title,
                     SubTitle = subTitle,
-                    IcoPath = string.IsNullOrEmpty(subTitle) || subTitle == "结束进程" ? "icon.png" : subTitle,
+                    IcoPath = string.IsNullOrEmpty(subTitleOrPath) || subTitleOrPath == "结束进程" ? "icon.png" : subTitleOrPath,
                     Score = score,
                     Action = _ =>
                     {
@@ -58,6 +63,40 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                 results.Add(result);
             }
 
+            // 若查询与某进程名完全匹配，增加“杀死 xxx 的所有实例（个数）”聚合结果
+            var exactMatches = items.Where(x => string.Equals(x.Name, search, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (exactMatches.Count > 0)
+            {
+                var first = exactMatches[0];
+                var name = first.Name;
+                var count = exactMatches.Count;
+                var pidsToKill = exactMatches.Select(x => x.Pid).ToList();
+                var icoPath = string.IsNullOrEmpty(first.SubTitleOrPath) || first.SubTitleOrPath == "结束进程" ? "icon.png" : first.SubTitleOrPath;
+                results.Add(new Result
+                {
+                    Title = $"杀死 {name} 的所有实例（{count}）",
+                    SubTitle = "一次性结束以上所有进程",
+                    IcoPath = icoPath,
+                    Score = 101, // 高于单条完全匹配 100，排在首位
+                    Action = _ =>
+                    {
+                        foreach (var pid in pidsToKill)
+                        {
+                            try
+                            {
+                                using var p = Process.GetProcessById(pid);
+                                p.Kill();
+                            }
+                            catch
+                            {
+                                // 进程可能已退出或无权限
+                            }
+                        }
+                        return true;
+                    }
+                });
+            }
+
             return results.OrderByDescending(r => r.Score).ToList();
         }
 
@@ -68,10 +107,10 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             "winlogon", "fontdrvhost", "dwm", "Registry", "Memory Compression"
         };
 
-        /// <summary>加载当前所有可访问的进程信息，返回 (PID, 可执行文件名不含后缀, 副标题)。不持有 Process 句柄。</summary>
-        private static List<(int Pid, string Name, string SubTitle)> LoadProcessInfos()
+        /// <summary>加载当前所有可访问的进程信息，返回 (PID, 可执行文件名不含后缀, 副标题/路径, 主窗口标题)。不持有 Process 句柄。</summary>
+        private static List<(int Pid, string Name, string SubTitleOrPath, string WindowTitle)> LoadProcessInfos()
         {
-            var list = new List<(int, string, string)>();
+            var list = new List<(int, string, string, string)>();
             Process[] processes;
             try
             {
@@ -90,8 +129,9 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                     if (string.IsNullOrEmpty(name) || CriticalProcessNames.Contains(name))
                         continue;
                     var pid = p.Id;
-                    var subTitle = GetProcessSubTitle(p);
-                    list.Add((pid, name, subTitle));
+                    var subTitleOrPath = GetProcessSubTitle(p);
+                    var windowTitle = GetProcessWindowTitle(p);
+                    list.Add((pid, name, subTitleOrPath, windowTitle));
                 }
                 catch
                 {
@@ -155,6 +195,20 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             catch
             {
                 return "结束进程";
+            }
+        }
+
+        /// <summary>获取进程主窗口标题；无窗口或无权限时返回空字符串。</summary>
+        private static string GetProcessWindowTitle(Process process)
+        {
+            try
+            {
+                var title = process.MainWindowTitle?.Trim();
+                return title ?? "";
+            }
+            catch
+            {
+                return "";
             }
         }
     }
