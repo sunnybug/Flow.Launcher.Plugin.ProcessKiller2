@@ -1,9 +1,9 @@
-﻿# -*- coding: utf-8-with-bom -*-
+# -*- coding: utf-8-with-bom -*-
 # 编译并安装 Flow Launcher 插件脚本
 
 param(
     [ValidateSet("Debug", "Release")]
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Debug"
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,8 +15,8 @@ $PluginID = $PluginConfig.ID
 $PluginName = $PluginConfig.Name
 $PluginVersion = $PluginConfig.Version
 
-# 编译输出路径
-$OutputPath = "Output\$Configuration\ProcessKiller2\net8.0-windows"
+# 编译输出路径（dotnet build 默认输出到 bin\Configuration）
+$OutputPath = "bin\$Configuration"
 
 # Flow Launcher 插件目录
 $FlowLauncherPluginsPath = Join-Path $env:APPDATA "FlowLauncher\Plugins"
