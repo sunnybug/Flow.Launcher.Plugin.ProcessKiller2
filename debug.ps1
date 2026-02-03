@@ -1,4 +1,4 @@
-﻿# 编译并安装 Flow Launcher 插件脚本
+# 编译并安装 Flow Launcher 插件脚本
 
 param(
     [ValidateSet("Debug", "Release")]
@@ -153,8 +153,7 @@ Write-Host "[6/8] 清理旧的插件目录..." -ForegroundColor Yellow
 # 可能的旧插件目录名称（不包括当前版本）
 $OldPluginPaths = @(
     (Join-Path $FlowLauncherPluginsPath $PluginID),  # ID 目录
-    (Join-Path $FlowLauncherPluginsPath "ProcessKiller2"),  # 旧的固定名称目录
-    (Join-Path $FlowLauncherPluginsPath "VS Code Workspaces-$PluginVersion")  # 带空格的旧名称
+    (Join-Path $FlowLauncherPluginsPath "ProcessKiller2")   # 旧的固定名称目录（无版本号）
 )
 
 foreach ($OldPath in $OldPluginPaths) {
@@ -162,6 +161,12 @@ foreach ($OldPath in $OldPluginPaths) {
         Write-Host "删除旧目录: $OldPath" -ForegroundColor Gray
         Remove-Item -Path $OldPath -Recurse -Force
     }
+}
+
+# 删除其他版本的 ProcessKiller2-* 目录（仅保留当前版本目录）
+Get-ChildItem -Path $FlowLauncherPluginsPath -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "ProcessKiller2-*" -and $_.Name -ne $PluginFolderName } | ForEach-Object {
+    Write-Host "删除旧版本目录: $($_.FullName)" -ForegroundColor Gray
+    Remove-Item -Path $_.FullName -Recurse -Force
 }
 
 # 创建或清空目标目录
