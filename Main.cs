@@ -69,7 +69,7 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             _context = context;
         }
 
-        /// <summary>处理用户查询并返回结果列表。触发关键字后加载所有进程，按可执行文件名（不含后缀）完全匹配、部分匹配计算权重。</summary>
+        /// <summary>处理用户查询并返回结果列表。若输入为数字则视为端口，只列出监听该端口的进程；否则按进程名匹配。</summary>
         public List<Result> Query(Query query)
         {
             var search = (query?.Search ?? "").Trim();
@@ -77,12 +77,25 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             if (string.IsNullOrEmpty(search))
                 return new List<Result>();
 
-            var items = LoadProcessInfos();
+            List<(int Pid, string Name, string SubTitleOrPath, string WindowTitle, string FileKeyInfo)> items;
+            var isPortQuery = int.TryParse(search, out int port) && port >= 1 && port <= 65535;
+            if (isPortQuery)
+            {
+                var pidsOnPort = GetPidsListeningOnPort(port);
+                if (pidsOnPort.Count == 0)
+                    return new List<Result> { new Result { Title = $"端口 {port} 无监听进程", SubTitle = "请检查端口号或改用进程名搜索", IcoPath = "icon.png" } };
+                items = LoadProcessInfosFilteredByPids(pidsOnPort);
+            }
+            else
+            {
+                items = LoadProcessInfos();
+            }
+
             var results = new List<Result>();
 
-            foreach (var (pid, name, subTitleOrPath, windowTitle) in items)
+            foreach (var (pid, name, subTitleOrPath, windowTitle, fileKeyInfo) in items)
             {
-                int score = ComputeScore(name, search);
+                int score = isPortQuery ? 100 : ComputeScore(name, search);
                 if (score < 0)
                     continue;
 
@@ -91,7 +104,14 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                 var title = !string.IsNullOrEmpty(windowTitle)
                     ? windowTitle
                     : $"{name} (PID: {pid})";
-                var subTitle = $"{name} (PID: {pid}) · " + (subTitleOrPath ?? "结束进程");
+                if (isPortQuery)
+                    title = $"{title} · 端口 {port}";
+                var isCritical = CriticalProcessNames.Contains(name);
+                var pathOrAction = subTitleOrPath ?? "结束进程";
+                var keyInfoSuffix = string.IsNullOrEmpty(fileKeyInfo) ? "" : " · " + fileKeyInfo;
+                var subTitle = isPortQuery
+                    ? $"{name} (PID: {pid}) · 监听端口 {port} · " + (isCritical ? "系统关键进程，不可强杀" : pathOrAction + keyInfoSuffix)
+                    : $"{name} (PID: {pid}) · " + pathOrAction + keyInfoSuffix;
 
                 var result = new Result
                 {
@@ -101,6 +121,11 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                     Score = score,
                     Action = _ =>
                     {
+                        if (isCritical)
+                        {
+                            _context.API.ShowMsg("系统关键进程", "不允许强杀，以免影响系统稳定。", "icon.png", false);
+                            return false;
+                        }
                         try
                         {
                             using var p = Process.GetProcessById(pidToKill);
@@ -116,8 +141,8 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                 results.Add(result);
             }
 
-            // 若查询与某进程名完全匹配，增加“杀死 xxx 的所有实例（个数）”聚合结果
-            var exactMatches = items.Where(x => string.Equals(x.Name, search, StringComparison.OrdinalIgnoreCase)).ToList();
+            // 若查询与某进程名完全匹配（且非端口查询），增加“杀死 xxx 的所有实例（个数）”聚合结果
+            var exactMatches = isPortQuery ? new List<(int Pid, string Name, string SubTitleOrPath, string WindowTitle, string FileKeyInfo)>() : items.Where(x => string.Equals(x.Name, search, StringComparison.OrdinalIgnoreCase)).ToList();
             if (exactMatches.Count > 0)
             {
                 var first = exactMatches[0];
@@ -157,13 +182,13 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
         private static readonly HashSet<string> CriticalProcessNames = new(StringComparer.OrdinalIgnoreCase)
         {
             "System", "Idle", "smss", "csrss", "wininit", "services", "lsass",
-            "winlogon", "fontdrvhost", "dwm", "Registry", "Memory Compression"
+            "winlogon", "fontdrvhost", "dwm", "Registry", "Memory Compression","svchost"
         };
 
-        /// <summary>加载当前所有可访问的进程信息，返回 (PID, 可执行文件名不含后缀, 副标题/路径, 窗口标题)。多窗口进程会返回多条（每条一个窗口标题）。</summary>
-        private static List<(int Pid, string Name, string SubTitleOrPath, string WindowTitle)> LoadProcessInfos()
+        /// <summary>加载当前所有可访问的进程信息，返回 (PID, 可执行文件名不含后缀, 路径, 窗口标题, 文件关键信息)。多窗口进程会返回多条（每条一个窗口标题）。</summary>
+        private static List<(int Pid, string Name, string SubTitleOrPath, string WindowTitle, string FileKeyInfo)> LoadProcessInfos()
         {
-            var list = new List<(int, string, string, string)>();
+            var list = new List<(int, string, string, string, string)>();
             var titlesByPid = WindowEnumHelper.GetAllWindowTitlesByProcess();
 
             Process[] processes;
@@ -186,15 +211,16 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                     var pid = p.Id;
                     var subTitleOrPath = GetProcessSubTitle(p);
 
+                    var fileKeyInfo = GetProcessFileKeyInfo(p);
                     if (titlesByPid.TryGetValue(pid, out var titles) && titles.Count > 0)
                     {
                         foreach (var title in titles)
-                            list.Add((pid, name, subTitleOrPath, title));
+                            list.Add((pid, name, subTitleOrPath, title, fileKeyInfo));
                     }
                     else
                     {
                         var windowTitle = GetProcessWindowTitle(p);
-                        list.Add((pid, name, subTitleOrPath, windowTitle));
+                        list.Add((pid, name, subTitleOrPath, windowTitle, fileKeyInfo));
                     }
                 }
                 catch
@@ -207,6 +233,82 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                 }
             }
 
+            return list;
+        }
+
+        /// <summary>获取正在监听指定端口的进程 PID 列表。通过 netstat -ano 解析，包含 TCP IPv4 与 TCPv6。</summary>
+        private static List<int> GetPidsListeningOnPort(int port)
+        {
+            var pids = new HashSet<int>();
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "netstat.exe",
+                    Arguments = "-ano",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+                using var proc = Process.Start(psi);
+                if (proc == null) return pids.ToList();
+                var output = proc.StandardOutput.ReadToEnd();
+                proc.WaitForExit(3000);
+                var portStr = port.ToString();
+                foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (!line.Contains("LISTENING", StringComparison.Ordinal)) continue;
+                    var parts = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length < 5) continue;
+                    // 格式: Proto LocalAddress ForeignAddress State PID（TCP/TCPv6 均为此格式）
+                    if (!string.Equals(parts[0], "TCP", StringComparison.OrdinalIgnoreCase)) continue;
+                    var localAddr = parts[1];
+                    var state = parts[3];
+                    if (state != "LISTENING" || !localAddr.EndsWith(":" + portStr, StringComparison.Ordinal))
+                        continue;
+                    if (int.TryParse(parts[4], out int pid) && pid > 0)
+                        pids.Add(pid);
+                }
+            }
+            catch
+            {
+                // 忽略 netstat 执行或解析异常
+            }
+            return pids.ToList();
+        }
+
+        /// <summary>仅加载指定 PID 列表的进程信息，用于端口查询场景。</summary>
+        private static List<(int Pid, string Name, string SubTitleOrPath, string WindowTitle, string FileKeyInfo)> LoadProcessInfosFilteredByPids(List<int> pids)
+        {
+            var list = new List<(int, string, string, string, string)>();
+            var titlesByPid = WindowEnumHelper.GetAllWindowTitlesByProcess();
+            foreach (int pid in pids)
+            {
+                try
+                {
+                    using var p = Process.GetProcessById(pid);
+                    var name = GetProcessDisplayName(p);
+                    if (string.IsNullOrEmpty(name))
+                        continue;
+                    // 端口查询时不过滤系统关键进程，以便显示；强杀时再拦截
+                    var subTitleOrPath = GetProcessSubTitle(p);
+                    var fileKeyInfo = GetProcessFileKeyInfo(p);
+                    if (titlesByPid.TryGetValue(pid, out var titles) && titles.Count > 0)
+                    {
+                        foreach (var title in titles)
+                            list.Add((pid, name, subTitleOrPath, title, fileKeyInfo));
+                    }
+                    else
+                    {
+                        var windowTitle = GetProcessWindowTitle(p);
+                        list.Add((pid, name, subTitleOrPath, windowTitle, fileKeyInfo));
+                    }
+                }
+                catch
+                {
+                    // 进程可能已退出或无权限
+                }
+            }
             return list;
         }
 
@@ -260,6 +362,40 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             {
                 return "结束进程";
             }
+        }
+
+        /// <summary>从进程主模块路径读取版本资源，返回产品名/文件描述/公司名等关键信息（优先 ProductName）。</summary>
+        private static string GetProcessFileKeyInfo(Process process)
+        {
+            string path = null;
+            try
+            {
+                path = process.MainModule?.FileName;
+            }
+            catch
+            {
+                return "";
+            }
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                return "";
+            try
+            {
+                var vi = FileVersionInfo.GetVersionInfo(path);
+                var product = vi.ProductName?.Trim();
+                var description = vi.FileDescription?.Trim();
+                var company = vi.CompanyName?.Trim();
+                if (!string.IsNullOrEmpty(product))
+                    return product;
+                if (!string.IsNullOrEmpty(description))
+                    return description;
+                if (!string.IsNullOrEmpty(company))
+                    return company;
+            }
+            catch
+            {
+                // 无权限或非 PE 文件
+            }
+            return "";
         }
 
         /// <summary>获取进程主窗口标题；无窗口或无权限时返回空字符串。</summary>
