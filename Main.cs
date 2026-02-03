@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using Flow.Launcher.Plugin;
+using Flow.Launcher.Plugin.ProcessKiller2.Properties;
 
 namespace Flow.Launcher.Plugin.ProcessKiller2
 {
@@ -59,7 +61,7 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
         }
     }
     /// <summary>Flow Launcher 插件：进程结束（ProcessKiller2）。</summary>
-    public class ProcessKiller2 : IPlugin
+    public class ProcessKiller2 : IPlugin, IPluginI18n
     {
         private PluginInitContext _context;
 
@@ -68,6 +70,24 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
         {
             _context = context;
         }
+
+        /// <summary>插件显示名称（随语言切换）。</summary>
+        public string Name => GetTranslatedPluginTitle();
+
+        /// <summary>插件描述（随语言切换）。</summary>
+        public string Description => GetTranslatedPluginDescription();
+
+        /// <inheritdoc />
+        public void OnCultureInfoChanged(CultureInfo newCulture)
+        {
+            Resources.Culture = newCulture;
+        }
+
+        /// <inheritdoc />
+        public string GetTranslatedPluginTitle() => Resources.PluginTitle;
+
+        /// <inheritdoc />
+        public string GetTranslatedPluginDescription() => Resources.PluginDescription;
 
         /// <summary>处理用户查询并返回结果列表。若输入为数字则视为端口，只列出监听该端口的进程；否则按进程名匹配。</summary>
         public List<Result> Query(Query query)
@@ -83,7 +103,7 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             {
                 var pidsOnPort = GetPidsListeningOnPort(port);
                 if (pidsOnPort.Count == 0)
-                    return new List<Result> { new Result { Title = $"端口 {port} 无监听进程", SubTitle = "请检查端口号或改用进程名搜索", IcoPath = "icon.png" } };
+                    return new List<Result> { new Result { Title = string.Format(CultureInfo.CurrentUICulture, Resources.PortNoProcess, port), SubTitle = Resources.PortCheckOrSearchByName, IcoPath = "icon.png" } };
                 items = LoadProcessInfosFilteredByPids(pidsOnPort);
             }
             else
@@ -105,25 +125,25 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                     ? windowTitle
                     : $"{name} (PID: {pid})";
                 if (isPortQuery)
-                    title = $"{title} · 端口 {port}";
+                    title = title + string.Format(CultureInfo.CurrentUICulture, Resources.PortTitleSuffix, port);
                 var isCritical = CriticalProcessNames.Contains(name);
-                var pathOrAction = subTitleOrPath ?? "结束进程";
+                var pathOrAction = subTitleOrPath ?? Resources.KillProcess;
                 var keyInfoSuffix = string.IsNullOrEmpty(fileKeyInfo) ? "" : " · " + fileKeyInfo;
                 var subTitle = isPortQuery
-                    ? $"{name} (PID: {pid}) · 监听端口 {port} · " + (isCritical ? "系统关键进程，不可强杀" : pathOrAction + keyInfoSuffix)
+                    ? $"{name} (PID: {pid}) · " + string.Format(CultureInfo.CurrentUICulture, Resources.ListeningPortFormat, port) + " · " + (isCritical ? Resources.CriticalNoKill : pathOrAction + keyInfoSuffix)
                     : $"{name} (PID: {pid}) · " + pathOrAction + keyInfoSuffix;
 
                 var result = new Result
                 {
                     Title = title,
                     SubTitle = subTitle,
-                    IcoPath = string.IsNullOrEmpty(subTitleOrPath) || subTitleOrPath == "结束进程" ? "icon.png" : subTitleOrPath,
+                    IcoPath = string.IsNullOrEmpty(subTitleOrPath) || subTitleOrPath == Resources.KillProcess ? "icon.png" : subTitleOrPath,
                     Score = score,
                     Action = _ =>
                     {
                         if (isCritical)
                         {
-                            _context.API.ShowMsg("系统关键进程", "不允许强杀，以免影响系统稳定。", "icon.png", false);
+                            _context.API.ShowMsg(Resources.CriticalProcess, Resources.CriticalNoKillMessage, "icon.png", false);
                             return false;
                         }
                         try
@@ -149,11 +169,11 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                 var name = first.Name;
                 var count = exactMatches.Count;
                 var pidsToKill = exactMatches.Select(x => x.Pid).Distinct().ToList();
-                var icoPath = string.IsNullOrEmpty(first.SubTitleOrPath) || first.SubTitleOrPath == "结束进程" ? "icon.png" : first.SubTitleOrPath;
+                var icoPath = string.IsNullOrEmpty(first.SubTitleOrPath) || first.SubTitleOrPath == Resources.KillProcess ? "icon.png" : first.SubTitleOrPath;
                 results.Add(new Result
                 {
-                    Title = $"杀死 {name} 的所有实例（{count}）",
-                    SubTitle = "一次性结束以上所有进程",
+                    Title = string.Format(CultureInfo.CurrentUICulture, Resources.KillAllInstances, name, count),
+                    SubTitle = Resources.KillAllInstancesSubtitle,
                     IcoPath = icoPath,
                     Score = 101, // 高于单条完全匹配 100，排在首位
                     Action = _ =>
@@ -213,7 +233,7 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
 
                     var pid = p.Id;
                     var path = GetProcessPath(p);
-                    var subTitleOrPath = !string.IsNullOrEmpty(path) ? path : "结束进程";
+                    var subTitleOrPath = !string.IsNullOrEmpty(path) ? path : Resources.KillProcess;
                     var fileKeyInfo = GetFileKeyInfoFromPath(path);
                     if (titlesByPid.TryGetValue(pid, out var titles) && titles.Count > 0)
                     {
@@ -332,7 +352,7 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                     if (string.IsNullOrEmpty(name))
                         continue;
                     var path = GetProcessPath(p);
-                    var subTitleOrPath = !string.IsNullOrEmpty(path) ? path : "结束进程";
+                    var subTitleOrPath = !string.IsNullOrEmpty(path) ? path : Resources.KillProcess;
                     var fileKeyInfo = GetFileKeyInfoFromPath(path);
                     if (titlesByPid.TryGetValue(pid, out var titles) && titles.Count > 0)
                     {
