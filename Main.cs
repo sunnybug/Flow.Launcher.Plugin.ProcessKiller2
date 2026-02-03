@@ -88,7 +88,7 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             }
             else
             {
-                items = LoadProcessInfos();
+                items = LoadProcessInfos(search);
             }
 
             var results = new List<Result>();
@@ -185,8 +185,8 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             "winlogon", "fontdrvhost", "dwm", "Registry", "Memory Compression","svchost"
         };
 
-        /// <summary>加载当前所有可访问的进程信息，返回 (PID, 可执行文件名不含后缀, 路径, 窗口标题, 文件关键信息)。多窗口进程会返回多条（每条一个窗口标题）。</summary>
-        private static List<(int Pid, string Name, string SubTitleOrPath, string WindowTitle, string FileKeyInfo)> LoadProcessInfos()
+        /// <summary>加载当前可访问且与 search 匹配的进程信息。先按名称过滤再取路径/图标/版本信息，减少无效进程的昂贵操作。</summary>
+        private static List<(int Pid, string Name, string SubTitleOrPath, string WindowTitle, string FileKeyInfo)> LoadProcessInfos(string search)
         {
             var list = new List<(int, string, string, string, string)>();
             var titlesByPid = WindowEnumHelper.GetAllWindowTitlesByProcess();
@@ -208,10 +208,13 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                     var name = GetProcessDisplayName(p);
                     if (string.IsNullOrEmpty(name) || CriticalProcessNames.Contains(name))
                         continue;
-                    var pid = p.Id;
-                    var subTitleOrPath = GetProcessSubTitle(p);
+                    if (ComputeScore(name, search) < 0)
+                        continue;
 
-                    var fileKeyInfo = GetProcessFileKeyInfo(p);
+                    var pid = p.Id;
+                    var path = GetProcessPath(p);
+                    var subTitleOrPath = !string.IsNullOrEmpty(path) ? path : "结束进程";
+                    var fileKeyInfo = GetFileKeyInfoFromPath(path);
                     if (titlesByPid.TryGetValue(pid, out var titles) && titles.Count > 0)
                     {
                         foreach (var title in titles)
@@ -234,6 +237,44 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             }
 
             return list;
+        }
+
+        /// <summary>获取进程主模块路径；无权限时返回 null。</summary>
+        private static string GetProcessPath(Process process)
+        {
+            try
+            {
+                return process.MainModule?.FileName;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>从可执行文件路径读取版本资源，返回产品名/描述/公司等关键信息。仅在有路径且文件存在时访问磁盘。</summary>
+        private static string GetFileKeyInfoFromPath(string path)
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                return "";
+            try
+            {
+                var vi = FileVersionInfo.GetVersionInfo(path);
+                var product = vi.ProductName?.Trim();
+                var description = vi.FileDescription?.Trim();
+                var company = vi.CompanyName?.Trim();
+                if (!string.IsNullOrEmpty(product))
+                    return product;
+                if (!string.IsNullOrEmpty(description))
+                    return description;
+                if (!string.IsNullOrEmpty(company))
+                    return company;
+            }
+            catch
+            {
+                // 无权限或非 PE 文件
+            }
+            return "";
         }
 
         /// <summary>获取正在监听指定端口的进程 PID 列表。通过 netstat -ano 解析，包含 TCP IPv4 与 TCPv6。</summary>
@@ -277,7 +318,7 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             return pids.ToList();
         }
 
-        /// <summary>仅加载指定 PID 列表的进程信息，用于端口查询场景。</summary>
+        /// <summary>仅加载指定 PID 列表的进程信息，用于端口查询场景。主模块路径只取一次。</summary>
         private static List<(int Pid, string Name, string SubTitleOrPath, string WindowTitle, string FileKeyInfo)> LoadProcessInfosFilteredByPids(List<int> pids)
         {
             var list = new List<(int, string, string, string, string)>();
@@ -290,9 +331,9 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                     var name = GetProcessDisplayName(p);
                     if (string.IsNullOrEmpty(name))
                         continue;
-                    // 端口查询时不过滤系统关键进程，以便显示；强杀时再拦截
-                    var subTitleOrPath = GetProcessSubTitle(p);
-                    var fileKeyInfo = GetProcessFileKeyInfo(p);
+                    var path = GetProcessPath(p);
+                    var subTitleOrPath = !string.IsNullOrEmpty(path) ? path : "结束进程";
+                    var fileKeyInfo = GetFileKeyInfoFromPath(path);
                     if (titlesByPid.TryGetValue(pid, out var titles) && titles.Count > 0)
                     {
                         foreach (var title in titles)
@@ -348,52 +389,6 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             catch
             {
                 // 无权限或 32/64 位差异时 MainModule 会抛
-            }
-            return "";
-        }
-
-        private static string GetProcessSubTitle(Process process)
-        {
-            try
-            {
-                return process.MainModule?.FileName ?? "结束进程";
-            }
-            catch
-            {
-                return "结束进程";
-            }
-        }
-
-        /// <summary>从进程主模块路径读取版本资源，返回产品名/文件描述/公司名等关键信息（优先 ProductName）。</summary>
-        private static string GetProcessFileKeyInfo(Process process)
-        {
-            string path = null;
-            try
-            {
-                path = process.MainModule?.FileName;
-            }
-            catch
-            {
-                return "";
-            }
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
-                return "";
-            try
-            {
-                var vi = FileVersionInfo.GetVersionInfo(path);
-                var product = vi.ProductName?.Trim();
-                var description = vi.FileDescription?.Trim();
-                var company = vi.CompanyName?.Trim();
-                if (!string.IsNullOrEmpty(product))
-                    return product;
-                if (!string.IsNullOrEmpty(description))
-                    return description;
-                if (!string.IsNullOrEmpty(company))
-                    return company;
-            }
-            catch
-            {
-                // 无权限或非 PE 文件
             }
             return "";
         }
