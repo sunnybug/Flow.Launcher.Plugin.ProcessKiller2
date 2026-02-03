@@ -5,7 +5,7 @@
     "Name": "ProcessKiller2",
     "Description": "a Process Killer plugin for Flow-Launcher,support kill by port",
     "Author": "sunnybug",
-    "Version": "1.0.0",
+    "Version": "1.2.11",
     "Language": "csharp",
     "Website": "https://github.com/sunnybug/Flow.Launcher.Plugin.ProcessKiller2",
     "IcoPath": "icon.png",

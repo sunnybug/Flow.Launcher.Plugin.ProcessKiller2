@@ -1,7 +1,20 @@
-﻿Flow.Launcher.Plugin.ProcessKiller2
-==================
+# Flow.Launcher.Plugin.ProcessKiller2
 
-A plugin for the [Flow launcher](https://github.com/Flow-Launcher/Flow.Launcher).
-### Usage
+[Flow Launcher](https://github.com/Flow-Launcher/Flow.Launcher) 的进程结束插件，支持按进程名搜索与按端口查询。
 
-    ki <arguments>
+## 主要特色
+
+- **按进程名搜索**：输入进程名或部分名称，模糊匹配并排序（完全匹配优先）。
+- **按端口查进程**：输入数字 1–65535 视为端口号，列出监听该端口的进程并可结束。
+- **窗口标题展示**：枚举可见窗口，按进程收集窗口标题，结果中优先显示窗口标题便于识别。
+- **系统关键进程保护**：对 System、svchost、csrss、winlogon 等关键进程禁止强杀，并提示用户。
+- **一键结束同名所有实例**：当搜索与某进程名完全匹配时，会多出「杀死 xxx 的所有实例（个数）」选项，可一次性结束该名称的全部进程。
+- **进程详情**：显示可执行文件路径，以及从 PE 读取的产品名/描述/公司等版本信息，便于区分同名程序。
+- **图标与路径**：有主模块路径时使用该程序图标，无路径时使用默认图标。
+
+## 使用方式
+
+触发词：`ki`，其后输入搜索内容。
+
+- 按进程名：`ki chrome`、`ki notepad` 等。
+- 按端口：`ki 8080`、`ki 443` 等。
