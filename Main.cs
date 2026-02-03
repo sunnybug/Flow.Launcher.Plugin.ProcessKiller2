@@ -3,10 +3,61 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
 using Flow.Launcher.Plugin;
 
 namespace Flow.Launcher.Plugin.ProcessKiller2
 {
+    /// <summary>Win32 枚举窗口，按进程收集所有可见窗口标题。</summary>
+    internal static class WindowEnumHelper
+    {
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        /// <summary>枚举所有顶层可见窗口，按进程 ID 收集非空标题。返回 pid -> 该进程下所有窗口标题列表。</summary>
+        public static Dictionary<int, List<string>> GetAllWindowTitlesByProcess()
+        {
+            var byPid = new Dictionary<int, List<string>>();
+            var sb = new StringBuilder(512);
+
+            bool Callback(IntPtr hWnd, IntPtr _)
+            {
+                if (!IsWindowVisible(hWnd))
+                    return true;
+                if (GetWindowThreadProcessId(hWnd, out uint pid) == 0)
+                    return true;
+                sb.Clear();
+                if (GetWindowText(hWnd, sb, sb.Capacity) <= 0)
+                    return true;
+                var title = sb.ToString().Trim();
+                if (string.IsNullOrEmpty(title))
+                    return true;
+                int pidInt = (int)pid;
+                if (!byPid.TryGetValue(pidInt, out var list))
+                {
+                    list = new List<string>();
+                    byPid[pidInt] = list;
+                }
+                list.Add(title);
+                return true;
+            }
+
+            EnumWindows(Callback, IntPtr.Zero);
+            return byPid;
+        }
+    }
     /// <summary>Flow Launcher 插件：进程结束（ProcessKiller2）。</summary>
     public class ProcessKiller2 : IPlugin
     {
@@ -35,6 +86,8 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                 if (score < 0)
                     continue;
 
+                // 用局部变量保存 pid，确保回车时 Action 杀死的是当前选中项对应的进程
+                int pidToKill = pid;
                 var title = !string.IsNullOrEmpty(windowTitle)
                     ? windowTitle
                     : $"{name} (PID: {pid})";
@@ -50,7 +103,7 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                     {
                         try
                         {
-                            using var p = Process.GetProcessById(pid);
+                            using var p = Process.GetProcessById(pidToKill);
                             p.Kill();
                             return true;
                         }
@@ -70,7 +123,7 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                 var first = exactMatches[0];
                 var name = first.Name;
                 var count = exactMatches.Count;
-                var pidsToKill = exactMatches.Select(x => x.Pid).ToList();
+                var pidsToKill = exactMatches.Select(x => x.Pid).Distinct().ToList();
                 var icoPath = string.IsNullOrEmpty(first.SubTitleOrPath) || first.SubTitleOrPath == "结束进程" ? "icon.png" : first.SubTitleOrPath;
                 results.Add(new Result
                 {
@@ -107,10 +160,12 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
             "winlogon", "fontdrvhost", "dwm", "Registry", "Memory Compression"
         };
 
-        /// <summary>加载当前所有可访问的进程信息，返回 (PID, 可执行文件名不含后缀, 副标题/路径, 主窗口标题)。不持有 Process 句柄。</summary>
+        /// <summary>加载当前所有可访问的进程信息，返回 (PID, 可执行文件名不含后缀, 副标题/路径, 窗口标题)。多窗口进程会返回多条（每条一个窗口标题）。</summary>
         private static List<(int Pid, string Name, string SubTitleOrPath, string WindowTitle)> LoadProcessInfos()
         {
             var list = new List<(int, string, string, string)>();
+            var titlesByPid = WindowEnumHelper.GetAllWindowTitlesByProcess();
+
             Process[] processes;
             try
             {
@@ -130,8 +185,17 @@ namespace Flow.Launcher.Plugin.ProcessKiller2
                         continue;
                     var pid = p.Id;
                     var subTitleOrPath = GetProcessSubTitle(p);
-                    var windowTitle = GetProcessWindowTitle(p);
-                    list.Add((pid, name, subTitleOrPath, windowTitle));
+
+                    if (titlesByPid.TryGetValue(pid, out var titles) && titles.Count > 0)
+                    {
+                        foreach (var title in titles)
+                            list.Add((pid, name, subTitleOrPath, title));
+                    }
+                    else
+                    {
+                        var windowTitle = GetProcessWindowTitle(p);
+                        list.Add((pid, name, subTitleOrPath, windowTitle));
+                    }
                 }
                 catch
                 {
